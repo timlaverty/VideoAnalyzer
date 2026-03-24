@@ -62,6 +62,33 @@ def _cosine_sim(a, b):
     return float(np.dot(np.array(a), np.array(b)))
 
 
+def _build_frame_ranges(tracks_csv_path, track_ids):
+    """
+    Read tracks.csv and return {track_id: (min_frame, max_frame)} for each
+    requested track_id.  Used to enforce temporal non-overlap constraints.
+    """
+    wanted = set(track_ids)
+    ranges = {}
+    with open(tracks_csv_path) as f:
+        reader = csv.DictReader(f)
+        for row in reader:
+            tid = int(row["track_id"])
+            if tid not in wanted:
+                continue
+            fid = int(row["frame_id"])
+            if tid in ranges:
+                lo, hi = ranges[tid]
+                ranges[tid] = (min(lo, fid), max(hi, fid))
+            else:
+                ranges[tid] = (fid, fid)
+    return ranges
+
+
+def _ranges_overlap(range_a, range_b):
+    """Return True if two (min_frame, max_frame) ranges share at least one frame."""
+    return range_a[0] <= range_b[1] and range_b[0] <= range_a[1]
+
+
 def _hue_to_hex(hue_0_180):
     """Approximate RGB hex from OpenCV HSV hue (0-180 scale)."""
     h = (hue_0_180 / 180.0) * 360.0
@@ -150,6 +177,22 @@ def build_player_registry(reid_json_path, tracks_csv_path, output_dir,
         cos_sim = np.clip(emb_matrix @ emb_matrix.T, -1.0, 1.0)
         cos_dist = 1.0 - cos_sim
         np.fill_diagonal(cos_dist, 0.0)
+
+        # Hard constraint: tracks that coexist in time cannot be the same player.
+        # Set their distance to 2.0 (> max cosine distance of 1.0) so they are
+        # never merged regardless of similarity threshold.
+        frame_ranges = _build_frame_ranges(
+            tracks_csv_path, [tid for tid, _ in emb_tracks]
+        )
+        blocked = 0
+        for i, (tid_i, _) in enumerate(emb_tracks):
+            for j, (tid_j, _) in enumerate(emb_tracks):
+                if i < j and tid_i in frame_ranges and tid_j in frame_ranges:
+                    if _ranges_overlap(frame_ranges[tid_i], frame_ranges[tid_j]):
+                        cos_dist[i, j] = cos_dist[j, i] = 2.0
+                        blocked += 1
+        if blocked:
+            print(f"[identity] Temporal constraint blocked {blocked} impossible merges")
 
         dist_threshold = 1.0 - similarity_threshold
         Z = linkage(squareform(cos_dist), method="average")

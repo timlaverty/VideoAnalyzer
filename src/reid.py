@@ -57,12 +57,41 @@ except ImportError:
     EASYOCR_AVAILABLE = False
     print("[reid] WARNING: easyocr not installed. Jersey number recognition disabled.")
 
+try:
+    import torchreid
+    TORCHREID_AVAILABLE = True
+except ImportError:
+    TORCHREID_AVAILABLE = False
+
 MIN_CROP_W = 25
 MIN_CROP_H = 50
 
 
-def _build_embedding_model(device):
-    """ResNet50 with FC replaced by Identity → 2048-dim embedding output."""
+def _build_embedding_model(device, model_name="osnet"):
+    """
+    Build the appearance embedding model.
+
+    model_name="osnet":    OSNet-x1.0 pretrained on Market-1501 (512-dim).
+                           Requires torchreid; falls back to ResNet50 if unavailable.
+    model_name="resnet50": ResNet50 ImageNet (2048-dim). Always available.
+
+    Returns the model (already in eval mode, on the requested device).
+    """
+    if model_name == "osnet" and TORCHREID_AVAILABLE:
+        print("[reid] Embedding model: OSNet-x1.0 (Market-1501 pretrained, 512-dim)")
+        model = torchreid.models.build_model(
+            name="osnet_x1_0",
+            num_classes=1000,  # ImageNet — loads cleanly with pretrained=True
+            pretrained=True,
+        )
+        model.eval()
+        return model.to(device)
+
+    if model_name == "osnet" and not TORCHREID_AVAILABLE:
+        print("[reid] WARNING: torchreid not installed — falling back to ResNet50. "
+              "Run: pip install torchreid")
+
+    print("[reid] Embedding model: ResNet50 (ImageNet IMAGENET1K_V2, 2048-dim)")
     weights = models.ResNet50_Weights.IMAGENET1K_V2
     resnet = models.resnet50(weights=weights)
     resnet.fc = torch.nn.Identity()
@@ -70,35 +99,60 @@ def _build_embedding_model(device):
     return resnet.to(device)
 
 
+def _preprocess_crop_for_ocr(region_bgr):
+    """
+    Upscale 2x + CLAHE to improve OCR legibility on small/blurry crops.
+    Works in LAB color space so contrast enhancement is luminance-only.
+    """
+    h, w = region_bgr.shape[:2]
+    if h == 0 or w == 0:
+        return region_bgr
+    upscaled = cv2.resize(region_bgr, (w * 2, h * 2), interpolation=cv2.INTER_CUBIC)
+    lab = cv2.cvtColor(upscaled, cv2.COLOR_BGR2LAB)
+    clahe = cv2.createCLAHE(clipLimit=2.0, tileGridSize=(4, 4))
+    lab[:, :, 0] = clahe.apply(lab[:, :, 0])
+    return cv2.cvtColor(lab, cv2.COLOR_LAB2BGR)
+
+
 def _extract_jersey_number(ocr_reader, crop_bgr):
     """
-    Run digit OCR on the upper torso region of a player crop.
-    Returns (number_str, confidence) or (None, 0.0).
+    Run digit OCR across three overlapping torso slices, each preprocessed
+    with CLAHE + 2x upscale. Returns (number_str, best_confidence) or (None, 0.0).
+    Trying multiple regions handles jerseys where the number sits higher or lower
+    depending on the player's pose or crop alignment.
     """
     h, w = crop_bgr.shape[:2]
-    torso = crop_bgr[int(h * 0.1): int(h * 0.6), :]
-    if torso.size == 0:
-        return None, 0.0
+    regions = [
+        crop_bgr[int(h * 0.10): int(h * 0.40), :],   # upper chest
+        crop_bgr[int(h * 0.25): int(h * 0.55), :],   # mid chest
+        crop_bgr[int(h * 0.35): int(h * 0.65), :],   # lower chest / belly
+    ]
 
-    try:
-        results = ocr_reader.readtext(
-            torso,
-            allowlist="0123456789",
-            min_size=6,
-            text_threshold=0.6,
-            low_text=0.3,
-        )
-    except Exception:
-        return None, 0.0
+    best_text, best_conf = None, 0.0
+    for region in regions:
+        if region.size == 0:
+            continue
+        preprocessed = _preprocess_crop_for_ocr(region)
+        try:
+            results = ocr_reader.readtext(
+                preprocessed,
+                allowlist="0123456789",
+                min_size=6,
+                text_threshold=0.6,
+                low_text=0.3,
+            )
+        except Exception:
+            continue
+        if not results:
+            continue
+        candidate = max(results, key=lambda r: r[2])
+        text = candidate[1].strip()
+        conf = float(candidate[2])
+        if text and conf > best_conf:
+            best_text, best_conf = text, conf
 
-    if not results:
-        return None, 0.0
-
-    best = max(results, key=lambda r: r[2])
-    text = best[1].strip()
-    conf = float(best[2])
-    if text and conf > 0.5:
-        return text, conf
+    if best_text and best_conf > 0.5:
+        return best_text, best_conf
     return None, 0.0
 
 
@@ -139,7 +193,7 @@ def _extract_jersey_sv(crop_bgr):
     return sat, val
 
 
-def extract_reid_features(tracks_csv, crops_dir, output_dir, device="cpu"):
+def extract_reid_features(tracks_csv, crops_dir, output_dir, device="cpu", embedding_model_name="osnet"):
     """
     Extract jersey number, appearance embedding, and team color per track.
 
@@ -178,7 +232,7 @@ def extract_reid_features(tracks_csv, crops_dir, output_dir, device="cpu"):
 
     # Build models
     torch_device = torch.device(device if torch.cuda.is_available() or device == "cpu" else "cpu")
-    embedding_model = _build_embedding_model(torch_device)
+    embedding_model = _build_embedding_model(torch_device, embedding_model_name)
     ocr_reader = easyocr.Reader(["en"], verbose=False) if EASYOCR_AVAILABLE else None
 
     transform = transforms.Compose([
@@ -278,6 +332,9 @@ if __name__ == "__main__":
     parser.add_argument("--crops-dir", required=True)
     parser.add_argument("--output-dir", required=True)
     parser.add_argument("--device", default="cpu", choices=["cpu", "cuda"])
+    parser.add_argument("--embedding-model", default="osnet", choices=["osnet", "resnet50"],
+                        help="Appearance embedding backbone (default: osnet)")
     args = parser.parse_args()
 
-    extract_reid_features(args.tracks_csv, args.crops_dir, args.output_dir, args.device)
+    extract_reid_features(args.tracks_csv, args.crops_dir, args.output_dir,
+                          args.device, args.embedding_model)

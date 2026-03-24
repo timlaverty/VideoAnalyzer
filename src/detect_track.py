@@ -31,6 +31,7 @@ from tqdm import tqdm
 from ultralytics import YOLO
 
 YOLO_MODEL = "yolov8x.pt"
+YOLO_IMGSZ = 1280      # inference size; 1280 halves the downscale on 4K vs default 640
 PERSON_CLASS = 0
 CONF_THRESHOLD = 0.4
 IOU_THRESHOLD = 0.5
@@ -38,7 +39,55 @@ CROP_INTERVAL = 8     # save a crop every N processed frames per track
 MAX_CROPS_PER_TRACK = 20
 
 
-def run_detection(video_path, output_dir, skip_frames=1, device="cpu", max_frames=0):
+def _build_field_mask(video_path):
+    """
+    Sample one frame at 10% into the video and build a convex-hull mask of the
+    grass field via HSV green thresholding.
+
+    Returns:
+        hull array for cv2.pointPolygonTest, or None if the field cannot be
+        detected (pipeline continues without filtering in that case).
+    """
+    cap = cv2.VideoCapture(str(video_path))
+    if not cap.isOpened():
+        return None
+    total = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
+    cap.set(cv2.CAP_PROP_POS_FRAMES, max(0, total // 10))
+    ret, frame = cap.read()
+    cap.release()
+    if not ret:
+        return None
+
+    hsv = cv2.cvtColor(frame, cv2.COLOR_BGR2HSV)
+    # Grass green in OpenCV HSV: hue 25-90 (out of 180), moderate sat+val
+    mask = cv2.inRange(hsv, (25, 40, 40), (90, 255, 255))
+    kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (20, 20))
+    mask = cv2.morphologyEx(mask, cv2.MORPH_CLOSE, kernel)
+
+    green_frac = cv2.countNonZero(mask) / (frame.shape[0] * frame.shape[1])
+    if green_frac < 0.10:
+        print(f"[detect_track] Field mask: only {green_frac:.1%} green — disabling field filter")
+        return None
+
+    pts = cv2.findNonZero(mask)
+    hull = cv2.convexHull(pts)
+    print(f"[detect_track] Field mask built ({green_frac:.1%} green, hull={len(hull)} pts)")
+    return hull
+
+
+def _in_field(x1, y1, x2, y2, hull):
+    """
+    Return True if the bottom-centre of the bounding box (the player's feet)
+    lies inside the field convex hull.  Always True when hull is None.
+    """
+    if hull is None:
+        return True
+    cx = float((x1 + x2) / 2)
+    cy = float(y2)
+    return cv2.pointPolygonTest(hull, (cx, cy), False) >= 0
+
+
+def run_detection(video_path, output_dir, skip_frames=1, device="cpu", max_frames=0, imgsz=YOLO_IMGSZ):
     """
     Run YOLO + ByteTrack on a video file.
 
@@ -57,8 +106,10 @@ def run_detection(video_path, output_dir, skip_frames=1, device="cpu", max_frame
     crops_dir = output_dir / "crops"
     crops_dir.mkdir(parents=True, exist_ok=True)
 
-    print(f"[detect_track] Loading model: {YOLO_MODEL}")
+    print(f"[detect_track] Loading model: {YOLO_MODEL}  imgsz={imgsz}")
     model = YOLO(YOLO_MODEL)
+
+    field_hull = _build_field_mask(video_path)
 
     cap = cv2.VideoCapture(str(video_path))
     if not cap.isOpened():
@@ -101,7 +152,7 @@ def run_detection(video_path, output_dir, skip_frames=1, device="cpu", max_frame
                     iou=IOU_THRESHOLD,
                     device=device,
                     verbose=False,
-                    imgsz=640,
+                    imgsz=imgsz,
                 )
                 result = results[0]
 
@@ -116,6 +167,10 @@ def run_detection(video_path, output_dir, skip_frames=1, device="cpu", max_frame
                         y1 = max(0, y1)
                         x2 = min(width, x2)
                         y2 = min(height, y2)
+
+                        # Skip detections outside the playing field
+                        if not _in_field(x1, y1, x2, y2, field_hull):
+                            continue
 
                         records.append({
                             "frame_id": frame_idx,
@@ -169,6 +224,8 @@ if __name__ == "__main__":
     parser.add_argument("--output-dir", required=True, help="Output directory")
     parser.add_argument("--skip-frames", type=int, default=1)
     parser.add_argument("--device", default="cpu", choices=["cpu", "cuda"])
+    parser.add_argument("--imgsz", type=int, default=YOLO_IMGSZ,
+                        help="YOLO inference image size (default 1280; use 640 for faster CPU)")
     args = parser.parse_args()
 
-    run_detection(args.video, args.output_dir, args.skip_frames, args.device)
+    run_detection(args.video, args.output_dir, args.skip_frames, args.device, imgsz=args.imgsz)

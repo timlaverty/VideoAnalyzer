@@ -1,5 +1,8 @@
 # Core ML / CV
 torch>=2.0.0
+torchreid>=0.2.5         # OSNet person ReID embeddings (optional, falls back to ResNet50)
+gdown>=5.0.0             # required by torchreid for model weight downloads
+tensorboard>=2.0.0       # required by torchreid engine module
 torchvision>=0.15.0
 ultralytics>=8.0.0       # YOLOv8 + ByteTrack
 opencv-python>=4.8.0

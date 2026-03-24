@@ -143,6 +143,7 @@ def run_pipeline(args):
         skip_frames=args.skip_frames,
         device=args.device,
         max_frames=getattr(args, "max_frames", 0),
+        imgsz=getattr(args, "imgsz", 1280),
     )
 
     # ------------------------------------------------------------------ #
@@ -155,6 +156,7 @@ def run_pipeline(args):
         str(crops_dir),
         str(data_dir),
         device=args.device,
+        embedding_model_name=getattr(args, "embedding_model", "osnet"),
     )
 
     # ------------------------------------------------------------------ #
@@ -226,6 +228,10 @@ def main():
                         help="Merge clips separated by fewer than N seconds")
     parser.add_argument("--padding", type=float, default=2.0,
                         help="Pad each clip by N seconds on each side")
+    parser.add_argument("--imgsz", type=int, default=1280,
+                        help="YOLO inference image size (1280 recommended for 4K; 640 for faster CPU)")
+    parser.add_argument("--embedding-model", default="osnet", choices=["osnet", "resnet50"],
+                        help="Appearance embedding backbone")
     parser.add_argument("--max-frames", type=int, default=0,
                         help="Stop detection after N frames (0 = all). Use for quick smoke tests.")
     parser.add_argument("--serve", action="store_true",
