@@ -1,0 +1,21 @@
+# Core ML / CV
+torch>=2.0.0
+torchvision>=0.15.0
+ultralytics>=8.0.0       # YOLOv8 + ByteTrack
+opencv-python>=4.8.0
+Pillow>=10.0.0
+
+# Jersey number OCR
+easyocr>=1.7.0
+
+# Data / clustering
+numpy>=1.24.0
+scikit-learn>=1.3.0
+scipy>=1.11.0
+pandas>=2.0.0
+
+# Progress + CLI
+tqdm>=4.65.0
+
+# Bundled FFmpeg binary (no system install needed)
+imageio-ffmpeg>=0.4.9

@@ -1,0 +1,519 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Frisbee Video Analyzer</title>
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    :root {
+      --bg: #0f1117;
+      --surface: #1a1d27;
+      --surface2: #22263a;
+      --border: #2e3350;
+      --accent: #4f8ef7;
+      --text: #e2e8f0;
+      --text-muted: #8892a4;
+      --team-a: #3B82F6;
+      --team-b: #EF4444;
+      --team-unknown: #6B7280;
+      --green: #22c55e;
+      --red: #ef4444;
+    }
+
+    body {
+      background: var(--bg);
+      color: var(--text);
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      font-size: 14px;
+      display: flex;
+      flex-direction: column;
+      height: 100vh;
+      overflow: hidden;
+    }
+
+    /* ── Header ─────────────────────────────────────────────────────── */
+    header {
+      background: var(--surface);
+      border-bottom: 1px solid var(--border);
+      padding: 14px 24px;
+      display: flex;
+      align-items: center;
+      gap: 16px;
+      flex-shrink: 0;
+    }
+    header h1 {
+      font-size: 18px;
+      font-weight: 700;
+      letter-spacing: -0.3px;
+    }
+    #meta {
+      display: flex;
+      gap: 20px;
+      margin-left: auto;
+    }
+    .meta-item {
+      display: flex;
+      flex-direction: column;
+      align-items: flex-end;
+    }
+    .meta-label { font-size: 10px; color: var(--text-muted); text-transform: uppercase; letter-spacing: .5px; }
+    .meta-value { font-size: 13px; font-weight: 600; }
+
+    /* ── Layout ─────────────────────────────────────────────────────── */
+    .layout {
+      display: flex;
+      flex: 1;
+      overflow: hidden;
+    }
+
+    /* ── Sidebar ─────────────────────────────────────────────────────── */
+    aside {
+      width: 230px;
+      min-width: 200px;
+      background: var(--surface);
+      border-right: 1px solid var(--border);
+      display: flex;
+      flex-direction: column;
+      overflow: hidden;
+    }
+    .sidebar-header {
+      padding: 14px 16px 10px;
+      font-size: 11px;
+      font-weight: 600;
+      text-transform: uppercase;
+      letter-spacing: .8px;
+      color: var(--text-muted);
+      border-bottom: 1px solid var(--border);
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+    }
+    .player-list {
+      overflow-y: auto;
+      flex: 1;
+    }
+    .player-btn {
+      width: 100%;
+      background: none;
+      border: none;
+      border-bottom: 1px solid var(--border);
+      padding: 10px 16px;
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      text-align: left;
+      color: var(--text);
+      transition: background 0.1s;
+    }
+    .player-btn:hover { background: var(--surface2); }
+    .player-btn.active { background: var(--surface2); border-left: 3px solid var(--accent); }
+    .player-avatar {
+      width: 34px;
+      height: 34px;
+      border-radius: 50%;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 12px;
+      font-weight: 800;
+      flex-shrink: 0;
+      color: #fff;
+    }
+    .player-info { flex: 1; min-width: 0; }
+    .player-name {
+      font-weight: 600;
+      font-size: 13px;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+    .player-sub {
+      font-size: 11px;
+      color: var(--text-muted);
+      margin-top: 2px;
+    }
+    .clip-badge {
+      background: var(--surface2);
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      padding: 2px 7px;
+      font-size: 11px;
+      font-weight: 600;
+      color: var(--text-muted);
+      flex-shrink: 0;
+    }
+
+    /* ── Main content ────────────────────────────────────────────────── */
+    main {
+      flex: 1;
+      overflow-y: auto;
+      padding: 24px;
+      background: var(--bg);
+    }
+
+    #empty-state {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      height: 100%;
+      gap: 12px;
+      color: var(--text-muted);
+    }
+    #empty-state svg { opacity: 0.3; }
+    #empty-state p { font-size: 15px; }
+
+    #player-detail { display: none; }
+
+    .detail-header {
+      display: flex;
+      align-items: center;
+      gap: 14px;
+      margin-bottom: 20px;
+    }
+    .detail-avatar {
+      width: 54px;
+      height: 54px;
+      border-radius: 50%;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 20px;
+      font-weight: 900;
+      color: #fff;
+      flex-shrink: 0;
+    }
+    .detail-avatar-label { font-size: 20px; font-weight: 700; }
+    .detail-meta { display: flex; gap: 20px; margin-top: 4px; }
+    .detail-chip {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      padding: 3px 10px;
+      font-size: 12px;
+      font-weight: 600;
+      color: var(--text-muted);
+    }
+    .detail-chip span { color: var(--text); }
+
+    .section-title {
+      font-size: 11px;
+      font-weight: 700;
+      text-transform: uppercase;
+      letter-spacing: .8px;
+      color: var(--text-muted);
+      margin-bottom: 12px;
+    }
+
+    .clips-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fill, minmax(320px, 1fr));
+      gap: 16px;
+    }
+
+    .clip-card {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      overflow: hidden;
+      transition: border-color 0.15s;
+    }
+    .clip-card:hover { border-color: var(--accent); }
+
+    .clip-video-wrap {
+      position: relative;
+      background: #000;
+      aspect-ratio: 16/9;
+    }
+    .clip-video-wrap video {
+      width: 100%;
+      height: 100%;
+      object-fit: contain;
+      display: block;
+    }
+    .clip-failed {
+      position: absolute;
+      inset: 0;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      gap: 8px;
+      background: #0a0c14;
+      color: var(--text-muted);
+      font-size: 12px;
+    }
+
+    .clip-info {
+      padding: 10px 14px 12px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+    }
+    .clip-timestamp {
+      font-size: 13px;
+      font-weight: 700;
+      color: var(--text);
+    }
+    .clip-duration {
+      font-size: 11px;
+      color: var(--text-muted);
+      margin-top: 2px;
+    }
+    .clip-index {
+      font-size: 11px;
+      font-weight: 600;
+      color: var(--text-muted);
+      background: var(--surface2);
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      padding: 3px 9px;
+    }
+
+    /* Team label colors */
+    .team-A  { color: var(--team-a); }
+    .team-B  { color: var(--team-b); }
+    .team-\? { color: var(--team-unknown); }
+
+    /* ── Error / Loading ─────────────────────────────────────────────── */
+    #loading {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      height: 100vh;
+      flex-direction: column;
+      gap: 14px;
+      color: var(--text-muted);
+    }
+    .spinner {
+      width: 32px; height: 32px;
+      border: 3px solid var(--border);
+      border-top-color: var(--accent);
+      border-radius: 50%;
+      animation: spin 0.8s linear infinite;
+    }
+    @keyframes spin { to { transform: rotate(360deg); } }
+
+    #error-msg {
+      display: none;
+      padding: 24px;
+      color: var(--red);
+      background: #1a0a0a;
+      border: 1px solid #3a1515;
+      border-radius: 8px;
+      margin: 24px;
+      font-family: monospace;
+      font-size: 13px;
+      white-space: pre-wrap;
+    }
+
+    /* ── Scrollbar ───────────────────────────────────────────────────── */
+    ::-webkit-scrollbar { width: 6px; }
+    ::-webkit-scrollbar-track { background: transparent; }
+    ::-webkit-scrollbar-thumb { background: var(--border); border-radius: 3px; }
+  </style>
+</head>
+<body>
+
+<div id="loading">
+  <div class="spinner"></div>
+  <span>Loading player data…</span>
+</div>
+
+<div id="error-msg"></div>
+
+<div id="app" style="display:none; display:flex; flex-direction:column; height:100vh;">
+
+  <header>
+    <svg width="28" height="28" viewBox="0 0 28 28" fill="none">
+      <circle cx="14" cy="14" r="13" stroke="#4f8ef7" stroke-width="2"/>
+      <circle cx="14" cy="14" r="6" fill="#4f8ef7" opacity=".25"/>
+      <circle cx="14" cy="14" r="2.5" fill="#4f8ef7"/>
+    </svg>
+    <h1>Frisbee Video Analyzer</h1>
+    <div id="meta"></div>
+  </header>
+
+  <div class="layout">
+    <aside>
+      <div class="sidebar-header">
+        <span>Players</span>
+        <span id="player-count" style="font-size:12px;font-weight:700;color:var(--text)">—</span>
+      </div>
+      <div class="player-list" id="player-list"></div>
+    </aside>
+
+    <main>
+      <div id="empty-state">
+        <svg width="48" height="48" viewBox="0 0 48 48" fill="none">
+          <rect x="6" y="6" width="36" height="36" rx="6" stroke="currentColor" stroke-width="2"/>
+          <path d="M14 34L34 14M14 14l20 20" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
+        </svg>
+        <p>Select a player to view their clips</p>
+      </div>
+      <div id="player-detail"></div>
+    </main>
+  </div>
+
+</div>
+
+<script>
+  const $ = id => document.getElementById(id);
+
+  function fmt(sec) {
+    const s = Math.floor(sec);
+    const h = Math.floor(s / 3600);
+    const m = Math.floor((s % 3600) / 60);
+    const ss = s % 60;
+    if (h > 0) return `${h}:${String(m).padStart(2,'0')}:${String(ss).padStart(2,'0')}`;
+    return `${m}:${String(ss).padStart(2,'0')}`;
+  }
+
+  function fmtSec(sec) {
+    return sec < 60 ? `${sec.toFixed(1)}s` : `${(sec/60).toFixed(1)}m`;
+  }
+
+  function initials(label) {
+    if (label.startsWith('#')) return label.replace('#','');
+    const words = label.split(' ');
+    return words.length >= 2
+      ? (words[0][0] + words[1][0]).toUpperCase()
+      : label.slice(0,2).toUpperCase();
+  }
+
+  function renderMeta(data) {
+    $('meta').innerHTML = `
+      <div class="meta-item">
+        <span class="meta-label">Video</span>
+        <span class="meta-value" title="${data.video}">${data.video.length > 28 ? '…'+data.video.slice(-26) : data.video}</span>
+      </div>
+      <div class="meta-item">
+        <span class="meta-label">Duration</span>
+        <span class="meta-value">${fmt(data.video_duration_sec)}</span>
+      </div>
+      <div class="meta-item">
+        <span class="meta-label">FPS</span>
+        <span class="meta-value">${data.video_fps.toFixed(2)}</span>
+      </div>
+      <div class="meta-item">
+        <span class="meta-label">Processed</span>
+        <span class="meta-value">${data.processed_at.slice(0,10)}</span>
+      </div>
+    `;
+  }
+
+  function renderSidebar(players, onSelect) {
+    $('player-count').textContent = players.length;
+    const list = $('player-list');
+    list.innerHTML = '';
+
+    players.forEach((p, i) => {
+      const btn = document.createElement('button');
+      btn.className = 'player-btn';
+      btn.dataset.idx = i;
+      btn.innerHTML = `
+        <div class="player-avatar" style="background:${p.team_color_hex}">
+          ${initials(p.label)}
+        </div>
+        <div class="player-info">
+          <div class="player-name">${p.label}</div>
+          <div class="player-sub team-${p.team}">Team ${p.team} &bull; ${fmtSec(p.total_appearance_sec)}</div>
+        </div>
+        <div class="clip-badge">${p.total_clip_count}</div>
+      `;
+      btn.addEventListener('click', () => {
+        list.querySelectorAll('.player-btn').forEach(b => b.classList.remove('active'));
+        btn.classList.add('active');
+        onSelect(p);
+      });
+      list.appendChild(btn);
+    });
+  }
+
+  function renderPlayerDetail(player) {
+    $('empty-state').style.display = 'none';
+    const detail = $('player-detail');
+    detail.style.display = 'block';
+
+    const clipsHtml = player.clips.map(clip => {
+      const videoHtml = clip.extraction_success
+        ? `<video controls preload="metadata" src="${clip.clip_file}"></video>`
+        : `<div class="clip-failed">
+             <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
+               <circle cx="12" cy="12" r="10"/><line x1="15" y1="9" x2="9" y2="15"/>
+               <line x1="9" y1="9" x2="15" y2="15"/>
+             </svg>
+             <span>Extraction failed</span>
+           </div>`;
+
+      return `
+        <div class="clip-card">
+          <div class="clip-video-wrap">${videoHtml}</div>
+          <div class="clip-info">
+            <div>
+              <div class="clip-timestamp">${clip.start_time_str} &rarr; ${clip.end_time_str}</div>
+              <div class="clip-duration">${fmtSec(clip.duration_sec)} &bull; ${clip.start_sec.toFixed(1)}s &ndash; ${clip.end_sec.toFixed(1)}s</div>
+            </div>
+            <div class="clip-index">Clip ${clip.clip_index + 1}</div>
+          </div>
+        </div>
+      `;
+    }).join('');
+
+    detail.innerHTML = `
+      <div class="detail-header">
+        <div class="detail-avatar" style="background:${player.team_color_hex}">
+          ${initials(player.label)}
+        </div>
+        <div>
+          <div class="detail-avatar-label">${player.label}</div>
+          <div class="detail-meta">
+            <div class="detail-chip">Team <span class="team-${player.team}">${player.team}</span></div>
+            <div class="detail-chip">Clips <span>${player.total_clip_count}</span></div>
+            <div class="detail-chip">On screen <span>${fmtSec(player.total_appearance_sec)}</span></div>
+            ${player.jersey_number ? `<div class="detail-chip">Jersey <span>#${player.jersey_number}</span></div>` : ''}
+          </div>
+        </div>
+      </div>
+      <div class="section-title">Clips &amp; Timestamps</div>
+      <div class="clips-grid">${clipsHtml || '<p style="color:var(--text-muted)">No clips extracted for this player.</p>'}</div>
+    `;
+  }
+
+  async function init() {
+    try {
+      const res = await fetch('player_clips.json');
+      if (!res.ok) throw new Error(`HTTP ${res.status}: ${res.statusText}`);
+      const data = await res.json();
+
+      $('loading').style.display = 'none';
+      $('app').style.display = 'flex';
+
+      renderMeta(data);
+      renderSidebar(data.players, renderPlayerDetail);
+
+      // Auto-select first player
+      if (data.players.length > 0) {
+        const firstBtn = $('player-list').querySelector('.player-btn');
+        if (firstBtn) firstBtn.click();
+      }
+    } catch (err) {
+      $('loading').style.display = 'none';
+      const errEl = $('error-msg');
+      errEl.style.display = 'block';
+      errEl.textContent =
+        `Could not load player_clips.json\n\n${err.message}\n\n` +
+        `Make sure you are serving this page via the pipeline:\n` +
+        `  python src/pipeline.py --video game.mp4 --serve\n\n` +
+        `Or manually:\n` +
+        `  python -m http.server 8080 --directory output/<video_name>/`;
+    }
+  }
+
+  init();
+</script>
+</body>
+</html>
